@@ -1,1 +1,9 @@
+lib/
 .ipynb_checkpoints/
+.DS_Store
+ghostdriver.log
+test_screenshot.png
+test_screenshot_2.png
+test_screenshot_3.png
+test_screenshot_4.png
+ghostdriver.log
