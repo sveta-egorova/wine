@@ -1,4 +1,3 @@
--- we don't know how to generate root <with-no-name> (class Root) :(
 create table activity
 (
 	id int
@@ -69,7 +68,10 @@ create table price
 			primary key,
 	amount float,
 	discounted_from float,
-	type text
+	type text,
+	visibility int,
+	currency_code text,
+	bottle_type text
 );
 
 create table region
@@ -81,8 +83,13 @@ create table region
 	name_en text,
 	seo_name text,
 	country_code text
-		constraint region_country_country_code_fk
-			references country
+		references country
+);
+
+create table test_table
+(
+	code text,
+	name text
 );
 
 create table toplist
@@ -246,28 +253,15 @@ create table vintage
 	seo_name text,
 	name text,
 	wine_id int
-		constraint vintage_wine_id_fk
-			references wine,
+		references wine,
 	year int,
 	has_valid_ratings boolean,
 	status text,
 	ratings_count int,
 	ratings_average float,
-	labels_count int
-);
-
-create table vintage_price
-(
-	vintage_id int
-		references vintage,
+	labels_count int,
 	price_id int
-		references price,
-	median_amount float,
-	type text,
-	discounted_from float,
-	currency text,
-	constraint vintage_price_pk
-		unique (vintage_id, price_id)
+		references price
 );
 
 create table vintage_review
