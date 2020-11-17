@@ -1,0 +1,10 @@
+pandas
+numpy
+requests
+bs4
+selenium
+time
+pickle
+json
+ratelimiter
+sqlite3
