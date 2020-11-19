@@ -10,3 +10,5 @@ ghostdriver.log
 .idea/
 backup_data/
 data-export/
+secrets.py
+__pycache__/
