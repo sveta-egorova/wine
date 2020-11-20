@@ -35,14 +35,22 @@ def insert_to_wineries(conn, matches, first_entry=True):
     pk_sql = ['id']
     extract_json_to_sql(conn, matches, table, paths, pk_sql, first_entry)
 
-def extract_json_to_sql(conn, matches_list, table_name, paths, pk_sql=[], first_entry=True):
+def int_to_float(smth):
+    if isinstance(smth, int):
+        return float(smth)
+    elif smth == 'N.V.':
+        return 0    # meaning, wine is of type 'non-vintage' and is made of grapes from more than one harvest
+    else:
+        return smth
+
+def extract_json_to_sql(conn, matches_list, table_name, paths, pk_sql=[], first_entry=True, from_json_list_with_id = False):
     """
     Function that accepts the folowing arguments:
+    * conn: active connection to a database
     * matches list: JSON list with data,
     * table_name: name of SQL table to include data,
     * paths: the paths leading to data in JSON corresponding to each column in SQL table,
     * pk_sql: the names of primary key columns in SQL (to check for uniqueness condition),
-    * conn: active connection to a database
     * first_entry: boolean indicating whether it's the first time data is written to the table
 
     Function inserts data and (for the first entry) checks whether the resulting number of unique records in SQL
@@ -56,24 +64,40 @@ def extract_json_to_sql(conn, matches_list, table_name, paths, pk_sql=[], first_
     all_args = {}
 
     for entry in matches_list:
-        values_entry = [get_value(entry, path) for path in paths]
+        if from_json_list_with_id:
+            # if data is passed from json list, entry contains a tuple (id, relevant_data), which need to be flattened in a single arg list
+            values_entry = [entry[0]] + [int_to_float(get_value(entry[1], path)) for path in paths]
+            if paths == []:
+                for record in entry[1:]:
+                    all_args[(entry[0], record)] = (entry[0], record)
+        else:
+            values_entry = [int_to_float(get_value(entry, path)) for path in paths]
         pk_values = values_entry[:len(pk_sql)]
-        if all(pk_value is not None for pk_value in pk_values):
+        if all(pk_value is not None for pk_value in pk_values) and paths != []:
             all_args[tuple(pk_values)] = tuple(values_entry)
 
     if len(pk_sql) == 0:
         if_duplicates_do_nothing = ""
-    if len(pk_sql) == 1:
+    elif len(pk_sql) == 1:
         if_duplicates_do_nothing = f" ON DUPLICATE KEY UPDATE {pk_sql[0]} = {pk_sql[0]}"
-    if len(pk_sql) == 2:
+    elif len(pk_sql) == 2:
         if_duplicates_do_nothing = f" ON DUPLICATE KEY UPDATE {pk_sql[0]} = {pk_sql[0]}, {pk_sql[1]} = {pk_sql[1]}"
 
+    fields_num = len(paths)
+    if from_json_list_with_id and paths != []:
+        fields_num += 1
+    elif paths == []:
+        fields_num = 2
+
     query = f"""
-        INSERT INTO {table_name} VALUES ({', '.join('?' * len(paths))})
+        INSERT INTO {table_name} VALUES ({', '.join('?' * fields_num)})
         {if_duplicates_do_nothing};
     """.strip()
-    cur.executemany(query, list(all_args.values()))
-    conn.commit()
+    try:
+        cur.executemany(query, list(all_args.values()))
+        conn.commit()
+    except Exception as e:
+        print('oops')
 
     timepoint_2 = time.time()
     print('Insertion complete and took {} s.'.format(timepoint_2 - timepoint_1))
@@ -87,6 +111,26 @@ def extract_json_to_sql(conn, matches_list, table_name, paths, pk_sql=[], first_
             print('Number of unique records is accurate')
         else:
             print('Something went wrong')
+
+def extract_json_list_to_sql(conn, matches_list, table_name, path_to_list, paths_from_list, \
+                             path_to_id_outside_list="", pk_sql=[], first_entry=True):
+    """
+    converts list stored inside json to a normal list
+    """
+    results = []
+    for entry in matches_list:
+        if get_value(entry, path_to_list) is not None:
+            for element in get_value(entry, path_to_list):
+                if path_to_id_outside_list == "":
+                    results.append(element)
+                else:
+                    results.append((get_value(entry, path_to_id_outside_list), element))
+    if path_to_id_outside_list == "":
+        from_json_list_with_id = False
+    else:
+        from_json_list_with_id = True
+    extract_json_to_sql(conn, results, table_name, paths_from_list, pk_sql, first_entry, from_json_list_with_id)
+
 
 def get_value(match_entry, path0):
     """
@@ -121,11 +165,93 @@ def get_dataset(path):
         recovered_data = pickle.load(f)
     return remove_wine_duplicates(recovered_data)
 
+def clean_sql_table(conn, table_name):
+    """
+    delete all records from a given table in a given database
+    """
+    cur = conn.cursor()
+    cur.execute(f'DELETE FROM {table_name}')
+
+def insert_to_food(conn, matches, first_entry=True):
+    """
+    inserts data to correct fields in the style table
+    """
+    table = 'food'
+    path_to_list = 'vintage/wine/style/food'
+    paths_from_list = ['id', 'name', 'seo_name']
+    pk_sql = ['id']
+    extract_json_list_to_sql(conn, matches, table, path_to_list, paths_from_list, pk_sql, first_entry)
+
+def insert_to_wine(conn, matches, first_entry=True):
+    """
+    inserts data to correct fields in the wine table
+    """
+    table = 'wine'
+    main = 'vintage/wine/'
+    paths = [main + 'id', main + 'name', main + 'seo_name', main + 'type_id', main + 'vintage_type', main + 'is_natural',\
+             main + 'region/id', main + 'winery/id', main + 'taste/structure/acidity', main + 'taste/structure/fizziness',\
+             main + 'taste/structure/intensity', main + 'taste/structure/sweetness', main + 'taste/structure/tannin',\
+             main + 'taste/structure/user_structure_count', main + 'taste/structure/calculated_structure_count', \
+             main + 'style/id', main + 'statistics/status', main + 'statistics/ratings_count', main + 'statistics/ratings_average',\
+             main + 'statistics/labels_count', main + 'statistics/vintages_count', main + 'has_valid_ratings']
+    pk_sql = ['id']
+    extract_json_to_sql(conn, matches, table, paths, pk_sql, first_entry)
+
+
+def insert_to_vintage(conn, matches, first_entry=True):
+    """
+    inserts data to correct fields in the vintage table
+    """
+    table = 'vintage'
+    main = 'vintage/'
+    paths = [main + 'id', main + 'seo_name', main + 'name', main + 'wine/id', main + 'year', main + 'has_valid_ratings',\
+             main + 'statistics/status', main + 'statistics/ratings_count', main + 'statistics/ratings_average',\
+             main + 'statistics/labels_count', 'price/id']
+    pk_sql = ['id']
+    extract_json_to_sql(conn, matches, table, paths, pk_sql, first_entry, False)
+
+
+def insert_to_toplist(conn, matches, first_entry=True):
+    """
+    inserts data to correct fields in the toplist table
+    """
+    table = 'toplist'
+    path_to_list = 'vintage/top_list_rankings'
+    paths_from_list = ['id', 'location', 'name', 'seo_name', 'type', 'year']
+    pk_sql = ['id']
+    extract_json_list_to_sql(conn, matches, table, path_to_list, paths_from_list, pk_sql=pk_sql, first_entry=first_entry)
+
+
+def insert_to_facts(conn, matches, first_entry=True):
+    """
+    inserts data to correct fields in the facts table
+    """
+    table = 'facts'
+    path_to_list = 'vintage/wine/style/interesting_facts'
+    paths_from_list = []
+    path_to_id_outside_list = 'vintage/wine/style/id'
+    pk_sql = []
+    extract_json_list_to_sql(conn, matches, table, path_to_list, paths_from_list, path_to_id_outside_list, pk_sql, first_entry)
+
+
+
 
 if __name__ == "__main__":
     matches = get_dataset("backup_data/full_match_list")
     conn = connect_to_vivino_db()
+
+    # test_query = f"INSERT INTO wine VALUES ({', '.join(['%s']*22)})"
+    # args = (2057193, 'Achado Tinto', 'achado-tinto', 1, 0, False, 433, 58755, 3.2992158,
+    #         None, 5, 1.1879085, 3.9741828, 5, 8, 81, 'Normal', 410, 3.6, 1958, 17, True)
+    #
+    # try:
+    #     cur = conn.cursor()
+    #     cur.executemany(test_query, [args])
+    #     conn.commit()
+    # finally:
+    #     conn.close()
     try:
-        insert_to_wineries(conn, matches, True)
+        clean_sql_table(conn, 'facts')
+        insert_to_facts(conn, matches, True)
     finally:
         conn.close()
