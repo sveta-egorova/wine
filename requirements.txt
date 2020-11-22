@@ -1,0 +1,7 @@
+pandas
+numpy
+requests
+bs4
+selenium
+ratelimiter
+mariadb
