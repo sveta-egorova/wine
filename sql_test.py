@@ -103,6 +103,7 @@ def extract_json_to_sql(conn, matches_list, table_name, paths, pk_sql=[], first_
     print('Insertion complete and took {} s.'.format(timepoint_2 - timepoint_1))
 
     if first_entry:
+        # cur.close()
         cur = conn.cursor()
         cur.execute('SELECT COUNT(*) FROM {};'.format(table_name))
         unique_sql = cur.fetchall()[0][0]
@@ -163,7 +164,7 @@ def get_dataset(path):
     """
     with open(path, 'rb') as f:
         recovered_data = pickle.load(f)
-    return remove_wine_duplicates(recovered_data)
+    return recovered_data
 
 def clean_sql_table(conn, table_name):
     """
@@ -234,24 +235,59 @@ def insert_to_facts(conn, matches, first_entry=True):
     extract_json_list_to_sql(conn, matches, table, path_to_list, paths_from_list, path_to_id_outside_list, pk_sql, first_entry)
 
 
+def batching(func, batch_size):
+    """
+    performs a function with a big list broken down into batches of certain siz
+    """
+    def do_smth_by_batches(conn, big_list, first_entry):
+        num_batches = len(big_list) // batch_size
+        for i in range(num_batches + 1):
+            if i < num_batches + 1:
+                cur_batch = big_list[i*batch_size : (i+1)*batch_size]
+            elif i == num_batches + 1:
+                cur_batch = big_list[- (len(big_list) - num_batches * batch_size):]
+            func(conn, cur_batch, first_entry)
+    return do_smth_by_batches
 
+
+def insert_to_users(conn, matches, first_entry=True):
+    """
+    inserts data to correct fields in the user table
+    """
+    table = 'user'
+    main = 'user/'
+    paths = [main + 'id', main + 'seo_name', main + 'alias', main + 'is_featured', main + 'visibility', \
+            main + 'statistics/followers_count', main + 'statistics/followings_count', main + 'statistics/ratings_count',\
+            main + 'statistics/ratings_sum', main + 'statistics/reviews_count']
+    pk_sql = ['id']
+    extract_json_to_sql(conn, matches, table, paths, pk_sql, first_entry)
 
 if __name__ == "__main__":
-    matches = get_dataset("backup_data/full_match_list")
+    reviews = get_dataset("backup_data/reviews/Italy_2017")
     conn = connect_to_vivino_db()
 
-    # test_query = f"INSERT INTO wine VALUES ({', '.join(['%s']*22)})"
-    # args = (2057193, 'Achado Tinto', 'achado-tinto', 1, 0, False, 433, 58755, 3.2992158,
-    #         None, 5, 1.1879085, 3.9741828, 5, 8, 81, 'Normal', 410, 3.6, 1958, 17, True)
+    # query = 'INSERT INTO user VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id;'
+    # arg1 = (10577601.0, 'davidlowe10', 'David Lowe', 0.0, 'all', 2.0, 0.0, 17.0, 66.5, 11.0)
+    # arg2 = (6827219.0, 'luis-abb', 'Luis Abbate', 0.0, 'all', 13.0, 15.0, 286.0, 1184.0, 272.0)
+    # cur = conn.cursor()
     #
     # try:
-    #     cur = conn.cursor()
-    #     cur.executemany(test_query, [args])
+    #     cur.executemany(query, [arg1, arg2])
     #     conn.commit()
     # finally:
     #     conn.close()
+    #
+    # try:
+    #     insert_to_users(conn, reviews, True)
+    # finally:
+    #     conn.close()
+
+    insert_by_batch = batching(insert_to_users, 50000)
     try:
-        clean_sql_table(conn, 'facts')
-        insert_to_facts(conn, matches, True)
+        clean_sql_table(conn, 'user')
+        insert_by_batch(conn, reviews, False)
     finally:
         conn.close()
+
+    # reviews_first_batch = reviews[:50000]
+    # print(len(set([item['user']['id'] for item in reviews])))
