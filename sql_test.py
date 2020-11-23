@@ -1,6 +1,7 @@
 import pickle
 import time
 import mariadb
+import os
 
 
 import sys
@@ -239,14 +240,11 @@ def batching(func, batch_size):
     """
     performs a function with a big list broken down into batches of certain siz
     """
-    def do_smth_by_batches(conn, big_list, first_entry):
+    def do_smth_by_batches(conn, big_list, first_entry=False, verbose=False):
         num_batches = len(big_list) // batch_size
-        for i in range(num_batches + 1):
-            if i < num_batches + 1:
-                cur_batch = big_list[i*batch_size : (i+1)*batch_size]
-            elif i == num_batches + 1:
-                cur_batch = big_list[- (len(big_list) - num_batches * batch_size):]
-            func(conn, cur_batch, first_entry)
+        for i in range(0, len(big_list), batch_size):
+            cur_batch = big_list[i:(i + batch_size)]
+            func(conn, cur_batch, first_entry, verbose)
     return do_smth_by_batches
 
 
@@ -262,32 +260,37 @@ def insert_to_users(conn, matches, first_entry=True):
     pk_sql = ['id']
     extract_json_to_sql(conn, matches, table, paths, pk_sql, first_entry)
 
+
+def insert_to_reviews(conn, matches, first_entry=True, verbose=False):
+    """
+    inserts data to correct fields in the review table
+    """
+    table = 'user'
+    #     main = 'user/'
+    paths = ['id', 'rating', 'note', 'language', 'created_at', 'aggregated', 'user/id', 'activity/id', 'tagged_note']
+    pk_sql = ['id']
+    extract_json_to_sql(conn, matches, table, paths, pk_sql, first_entry, verbose)
+
+
+
+
 if __name__ == "__main__":
     reviews = get_dataset("backup_data/reviews/Italy_2017")
     conn = connect_to_vivino_db()
 
-    # query = 'INSERT INTO user VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id;'
-    # arg1 = (10577601.0, 'davidlowe10', 'David Lowe', 0.0, 'all', 2.0, 0.0, 17.0, 66.5, 11.0)
-    # arg2 = (6827219.0, 'luis-abb', 'Luis Abbate', 0.0, 'all', 13.0, 15.0, 286.0, 1184.0, 272.0)
-    # cur = conn.cursor()
-    #
-    # try:
-    #     cur.executemany(query, [arg1, arg2])
-    #     conn.commit()
-    # finally:
-    #     conn.close()
-    #
-    # try:
-    #     insert_to_users(conn, reviews, True)
-    # finally:
-    #     conn.close()
+    insert_by_batch = batching(insert_to_reviews, 50000)
 
-    insert_by_batch = batching(insert_to_users, 50000)
-    try:
-        clean_sql_table(conn, 'user')
-        insert_by_batch(conn, reviews, False)
-    finally:
-        conn.close()
+    directory = 'backup_data/reviews'
+    for filename in os.listdir(directory):
+        if filename.startswith("Italy"):
+            with open(f'{directory}/{filename}', 'rb') as f:
+                cur_reviews = pickle.load(f)
 
-    # reviews_first_batch = reviews[:50000]
-    # print(len(set([item['user']['id'] for item in reviews])))
+                conn = connect_to_vivino_db()
+                try:
+                    insert_by_batch(conn, cur_reviews, False, False)
+                finally:
+                    conn.close()
+
+                print(f"{len(cur_reviews)} records loaded to database from file {filename}...")
+    print("Loading complete.")
