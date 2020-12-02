@@ -12,3 +12,4 @@ backup_data/
 data-export/
 secrets.py
 __pycache__/
+venv/
