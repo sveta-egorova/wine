@@ -79,9 +79,9 @@ class Crawler:
 
             max_pages = math.ceil(num / 50)
 
-            if self.verbose:
-                print(
-                    f"The program will send up to {max_pages} requests to reviews API to extract up to {num} reviews for wine {wine_id}")
+            # if self.verbose:
+            #     print(
+            #         f"The program will send up to {max_pages} requests to reviews API to extract up to {num} reviews for wine {wine_id}")
 
             for it in range(1, max_pages + 1):
                 reviews_batch = self._parse_reviews(s, wine_id, year, it)
@@ -90,9 +90,9 @@ class Crawler:
                 else:
                     reviews += reviews_batch
 
-            if self.verbose and index % 100 == 0:
-                print(
-                    f"Record no. {index} with id {wine_id} finished. Currently stores {len(set([review['id'] for review in reviews]))} records")
+            # if self.verbose and index % 100 == 0:
+            #     print(
+            #         f"Record no. {index} with id {wine_id} finished. Currently stores {len(set([review['id'] for review in reviews]))} records")
 
         if self.verbose:
             print(f"Program uploaded {len(set([review['id'] for review in reviews]))} reviews for {country} "
@@ -114,9 +114,13 @@ class Crawler:
 
             records_total = self._parse_vintage_num(s, 1, price_min, price_max)
 
-            if price_min == 0 and price_max == 400 and with_prices is True:
+            if price_min == 0 and price_max == 400 and with_prices is True: # remove wines with no prices
                 # here, we remove all records with no prices. Those appear only when range (0, 400) is called
                 records_total -= self._parse_vintage_num(s, 1, 0, 0)
+
+            # elif price_min == 0 and price_max == 400 and with_prices is not True:
+            #     # here, we remove all records with no prices. Those appear only when range (0, 400) is called
+            #     records_total += self._parse_vintage_num(s, 1, 0, 0)
 
             print(
                 f'''The program recognized app.{records_total} unique records with a price from {price_min} to {price_max} 
@@ -128,10 +132,6 @@ class Crawler:
         # define iteration variables
         timepoint_iter = timepoint_start
         cur_batch = []
-
-        if price_min == 0 and price_max == 400 and with_prices is not True:  # remove wines with no prices
-            # here, we remove all records with no prices. Those appear only when range (0, 400) is called
-            records_total -= self._parse_vintage_num(1, 0, 0)
 
         # load each price
         for i in range(price_min, price_max):

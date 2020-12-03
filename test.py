@@ -5,6 +5,18 @@ from crawlers import *
 import pandas as pd
 
 
+def parse_years(years_string: str):
+    if years_string.startswith(':'):
+        year_start = 1900
+    else:
+        year_start = int(years_string[:4])
+    if years_string.endswith(':'):
+        year_end = 2025
+    else:
+        year_end = int(years_string[-4:])
+    return range(year_start, year_end + 1)
+
+
 def remove_wine_duplicates(json_data):
     distinct_dict = {entry['vintage']['id']: entry for entry in json_data}
     data_distinct = distinct_dict.values()
@@ -61,9 +73,7 @@ if __name__ == "__main__":
     # verbose = False
 
     backup_dir = "backup_data/"
-    year_start = int(years_string[:4])
-    year_end = int(years_string[-4:])
-    years = range(year_start, year_end + 1)
+    years = parse_years(years_string)
 
     crawler = Crawler(backup_dir=backup_dir, verbose=verbose)
 
@@ -81,7 +91,7 @@ if __name__ == "__main__":
             reviews = deduplicate_and_filter_reviews(reviews, year)
             save_reviews(reviews, backup_dir + 'reviews/', country, year)
 
-            print(f"After processing, the data on {country} and {year} includes {reviews['id'].nunique()} unique reviews")
+            print(f"After processing, the data on {country} in {year} includes {reviews['id'].nunique()} unique reviews")
 
 
     # print(reviews.groupby('vintage.year').count()['id'])
