@@ -2,7 +2,6 @@ import os
 import sys
 
 from crawlers import *
-import requests
 import pandas as pd
 
 
@@ -18,13 +17,11 @@ def remove_review_duplicates(json_data):
     return list(data_distinct)
 
 
-def read_and_preprocess_wines(path, country, year):
-    with open(path, 'rb') as f:
-        recovered_data = pickle.load(f)
-    full_df = pd.DataFrame(remove_wine_duplicates(recovered_data))
+def filter_wines(wine_list, country, year):
+    full_df = pd.DataFrame(remove_wine_duplicates(wine_list))
     full_df = pd.json_normalize(full_df['vintage'])
-    selected_columns = full_df[full_df['has_valid_ratings'] == True]\
-        [['id', 'year', 'statistics.ratings_count', 'wine.id', 'wine.region.country.name']]
+    selected_columns = full_df[full_df['has_valid_ratings'] == True][['id', 'year', 'statistics.ratings_count',
+                                                                      'wine.id', 'wine.region.country.name']]
     selected_columns.columns = ['id', 'year', 'rating_count', 'wine_id', 'country']
     data = selected_columns[(selected_columns['country'] == country) &
                             (selected_columns['year'] == year)]\
@@ -32,50 +29,59 @@ def read_and_preprocess_wines(path, country, year):
     return data
 
 
-def read_and_preprocess_reviews(country, year, backup_directory="backup_data/reviews/"):
-    with open(f"{backup_directory}{country}_{year}", 'rb') as f:
+def read_and_filter_wines(path, country, year):
+    with open(path, 'rb') as f:
         recovered_data = pickle.load(f)
-    full_df = pd.json_normalize(remove_review_duplicates(recovered_data))
-    selected_columns = full_df[(full_df['vintage.wine.region.country.name'] == country)
-                               & (full_df['vintage.year'] == year)]
+    return filter_wines(recovered_data, country, year)
+
+
+def deduplicate_and_filter_reviews(review_list, year):
+    full_df = pd.json_normalize(remove_review_duplicates(review_list))
+    selected_columns = full_df[(full_df['vintage.year'] == year)]
     # selected_columns.columns = ['id', 'year', 'rating_count', 'wine_id', 'country']
     return selected_columns
 
-# def filter_by_country_year(dataframe, country: str, year: str):
-#     data = dataframe[(dataframe['country'] == country) & (dataframe['year'] == year)]
-#     return data.sort_values('rating_count', ascending=False)
 
+def save_reviews(review_list, backup_dir, country, year):
+    with open(f"{backup_dir}{country}_{year}", 'wb') as f:
+        pickle.dump(review_list, f)
 
-# data_Italy_2014 = filter_df[(filter_df['country'] == 'Italy') & (filter_df['year'] == 2014)].sort_values('reviews_count', ascending=False)
-#
-#
 
 if __name__ == "__main__":
     """
-    Usage: python test.py France 2019
+    Usage: python test.py France 2011:2013 False
     """
 
     country = sys.argv[1]
-    year = int(sys.argv[2])
+    years_string = sys.argv[2]
+    verbose = bool(sys.argv[3])
 
-    crawler = Crawler()
+    # country = 'France'
+    # years_string = '2013:2015'
+    # verbose = False
 
-    full_list_file = "backup_data/full_match_list"
-    if os.path.isfile(full_list_file):
-        wines = read_and_preprocess_wines(full_list_file, country, year)
-    else:
-        wines = crawler.download_all_wines(105, 107, inter_backup=False, final_backup=False, verbose=True)
-        save_wines(full_list_file, wines)
-        wines = preprocess_wines(wines, country, year)
+    backup_dir = "backup_data/"
+    year_start = int(years_string[:4])
+    year_end = int(years_string[-4:])
+    years = range(year_start, year_end + 1)
 
-    reviews = crawler.download_reviews(wines)
-    s.close()
-    save_reviews("backup_directory/bla/", country, year, reviews)
+    crawler = Crawler(backup_dir=backup_dir, verbose=verbose)
 
-    # reviews = read_and_preprocess_reviews(country, year)  # TODO read_and_preprocess_reviews must include 2 calls: read and preprocess
-    reviews = deduplicate_and_filter_reviews(reviews, year)
-    print(f"After processing, the data on {country} and {year} includes {reviews['id'].nunique()} unique reviews")
+    for year in years:
+        if os.path.isfile(backup_dir + "full_match_list"):
+            wines = read_and_filter_wines(backup_dir + "full_match_list", country, year)
+        else:
+            wines = crawler.download_all_wines(105, 107, with_prices=True, inter_backup=False, final_backup=False)
+            wines = filter_wines(wines, country, year)
 
+        if len(wines) > 0:
+            reviews = crawler.download_reviews(wines, country, year)
+
+            # reviews = read_and_preprocess_reviews(country, year)  # TODO read_and_preprocess_reviews must include 2 calls: read and preprocess
+            reviews = deduplicate_and_filter_reviews(reviews, year)
+            save_reviews(reviews, backup_dir + 'reviews/', country, year)
+
+            print(f"After processing, the data on {country} and {year} includes {reviews['id'].nunique()} unique reviews")
 
 
     # print(reviews.groupby('vintage.year').count()['id'])

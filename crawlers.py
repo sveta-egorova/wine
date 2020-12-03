@@ -9,9 +9,15 @@ import pandas as pd
 
 
 class Crawler:
+    SESSION_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.193 Safari/537.36',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    }
 
-    def __init__(self, session):
-        self.session = session
+    def __init__(self, backup_dir, verbose):
+        self.backup_dir = backup_dir
+        self.verbose = verbose
 
     @RateLimiter(max_calls=1, period=1)
     def _call_to_api(self, s, page):
@@ -57,29 +63,23 @@ class Crawler:
         json_obj = self._call_to_api(s, page)
         return json_obj['reviews']
 
-    def download_reviews(self, df: pd.DataFrame, country: str, year, backup=True, verbose=True,
-                         backup_directory="backup_data/reviews/") -> List[Dict]:
+    def download_reviews(self, wines: pd.DataFrame, country, year) -> List[Dict]:
         """
         Function that returns all reviews extracted for a particular wine ID and year, and appends them to a given list.
         """
         s = requests.Session()
-        s.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.193 Safari/537.36',
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-        })
+        s.headers.update(Crawler.SESSION_HEADERS)
 
-        data = df[(df['country'] == country) & (df['year'] == year)].sort_values('rating_count', ascending=False)
         reviews = []
         timepoint_0 = time.time()
 
-        for index, row in data.iterrows():
+        for index, row in wines.iterrows():
             wine_id = row['wine_id']
             num = row['rating_count']
 
             max_pages = math.ceil(num / 50)
 
-            if verbose:
+            if self.verbose:
                 print(
                     f"The program will send up to {max_pages} requests to reviews API to extract up to {num} reviews for wine {wine_id}")
 
@@ -90,36 +90,27 @@ class Crawler:
                 else:
                     reviews += reviews_batch
 
-            if verbose and index % 100 == 0:
+            if self.verbose and index % 100 == 0:
                 print(
                     f"Record no. {index} with id {wine_id} finished. Currently stores {len(set([review['id'] for review in reviews]))} records")
 
-        if verbose:
-            print(
-                f"""Program uploaded {len(set([review['id'] for review in reviews]))} reviews for {country} for the year {year}. 
-        It took app. {round((time.time() - timepoint_0) / 60, 2)} minutes to run""")
+        if self.verbose:
+            print(f"Program uploaded {len(set([review['id'] for review in reviews]))} reviews for {country} "
+                  f"for the year {year}. It took app. {round((time.time() - timepoint_0) / 60, 2)} minutes to run")
 
-        # if backup:
-        #     with open(f"{backup_directory}{country}_{year}", 'wb') as f:
-        #         pickle.dump(reviews, f)
         s.close()
 
         return reviews
 
-    def download_all_wines(self, price_min=0, price_max=400, with_prices=True, inter_backup=True, final_backup=True,
-                           verbose=True):
+    def download_all_wines(self, price_min=0, price_max=400, with_prices=True, inter_backup=True, final_backup=True):
         """
         Function that iterates over small price ranges to extract all the data within a given range between min price and max price.
         If necessary, the function may store intermediate backups and/or a final backup inside pickle files.
         """
         s = requests.Session()
-        s.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.193 Safari/537.36',
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-        })
+        s.headers.update(Crawler.SESSION_HEADERS)
 
-        if verbose:
+        if self.verbose:
 
             records_total = self._parse_vintage_num(s, 1, price_min, price_max)
 
@@ -161,13 +152,13 @@ class Crawler:
                 if i % 10 == 0 and it == iterations_required:
                     if inter_backup:
                         # piece of code necessary to write intermediate backups in the process
-                        with open(f"backup_data/match_list_{i - 1}", 'wb') as f:
+                        with open(self.backup_dir + f"match_list_{i - 1}", 'wb') as f:
                             pickle.dump(cur_batch, f)
                     # append the batch results to the main list
                     full_wine_list.extend(cur_batch)
                     cur_batch = []
 
-                    if verbose:
+                    if self.verbose:
                         time_batch = time.time() - timepoint_iter
                         print(
                             f'''Bunch of records with price below {i + 1} uploaded and took {round(time_batch / 60, 2)} minutes. 
@@ -177,13 +168,15 @@ class Crawler:
             full_wine_list.extend(cur_batch)
 
         if final_backup:
-            with open(f"backup_data/full_match_list", 'wb') as f:
+            with open(self.backup_dir + "full_match_list", 'wb') as f:
                 pickle.dump(full_wine_list, f)
 
-        if verbose:
+        if self.verbose:
             total_time = time.time() - timepoint_start
             print(
                 f'''Program finished and successfully uploaded {len(full_wine_list)} wine records with prices(need to check duplicates).
                 The program took app. {round(total_time / 60, 2)} minutes to run''')
+
+        s.close()
 
         return full_wine_list
