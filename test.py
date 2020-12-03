@@ -29,22 +29,24 @@ def remove_review_duplicates(json_data):
     return list(data_distinct)
 
 
-def filter_wines(wine_list, country, year):
+def wines_as_df(wine_list):
     full_df = pd.DataFrame(remove_wine_duplicates(wine_list))
     full_df = pd.json_normalize(full_df['vintage'])
     selected_columns = full_df[full_df['has_valid_ratings'] == True][['id', 'year', 'statistics.ratings_count',
                                                                       'wine.id', 'wine.region.country.name']]
     selected_columns.columns = ['id', 'year', 'rating_count', 'wine_id', 'country']
-    data = selected_columns[(selected_columns['country'] == country) &
-                            (selected_columns['year'] == year)]\
-        .sort_values('rating_count', ascending=False)
-    return data
+    return selected_columns
 
 
-def read_and_filter_wines(path, country, year):
+def read_wines_to_df(path):
     with open(path, 'rb') as f:
         recovered_data = pickle.load(f)
-    return filter_wines(recovered_data, country, year)
+    return wines_as_df(recovered_data)
+
+
+def filter_wines(df, country, year):
+    data = df[(df['country'] == country) & (df['year'] == year)].sort_values('rating_count', ascending=False)
+    return data
 
 
 def deduplicate_and_filter_reviews(review_list, year):
@@ -77,21 +79,26 @@ if __name__ == "__main__":
 
     crawler = Crawler(backup_dir=backup_dir, verbose=verbose)
 
+    if os.path.isfile(backup_dir + "full_match_list"):
+        wines_df = read_wines_to_df(backup_dir + "full_match_list")
+    else:
+        wines = crawler.download_all_wines(105, 107, with_prices=True, inter_backup=False, final_backup=False)
+        wines_df = wines_as_df(wines)
+
     for year in years:
-        if os.path.isfile(backup_dir + "full_match_list"):
-            wines = read_and_filter_wines(backup_dir + "full_match_list", country, year)
-        else:
-            wines = crawler.download_all_wines(105, 107, with_prices=True, inter_backup=False, final_backup=False)
-            wines = filter_wines(wines, country, year)
+        wines = filter_wines(wines_df, country, year)
 
         if len(wines) > 0:
+            if verbose:
+                print(f"Loading year {year}, with {len(wines)} wines")
             reviews = crawler.download_reviews(wines, country, year)
 
-            # reviews = read_and_preprocess_reviews(country, year)  # TODO read_and_preprocess_reviews must include 2 calls: read and preprocess
             reviews = deduplicate_and_filter_reviews(reviews, year)
             save_reviews(reviews, backup_dir + 'reviews/', country, year)
 
-            print(f"After processing, the data on {country} in {year} includes {reviews['id'].nunique()} unique reviews")
+            if verbose:
+                print(f"After processing, the data on {country} in {year} includes {reviews['id'].nunique()} "
+                      f"unique reviews on {reviews['vintage.wine.id'].nunique()} wines")
 
 
     # print(reviews.groupby('vintage.year').count()['id'])
