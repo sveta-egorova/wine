@@ -112,22 +112,24 @@ if __name__ == "__main__":
     """
     Usage: python crawl.py [-h] [-v] country years
     """
-    #
-    # parser = argparse.ArgumentParser(description='Load some wine reviews')
-    # parser.add_argument("country", type=str, help="Input the country name, eg. France")
-    # parser.add_argument("years", type=str, help="Input the year or year range, eg. 2005:2010")
-    # parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-    # args = parser.parse_args()
-    #
-    # country = args.country
-    # years_string = args.years
-    # verbose = args.verbose
 
-    country = 'France'
-    years_string = '1937'
-    verbose = True
+    parser = argparse.ArgumentParser(description='Load some wine reviews')
+    parser.add_argument("country", type=str, help="Input the country name, eg. France")
+    parser.add_argument("years", type=str, help="Input the year or year range, eg. 2005:2010")
+    parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+    parser.add_argument("-p", "--path", help="path to save the backup output", default="backup_data/")
+    args = parser.parse_args()
 
-    backup_dir = "backup_data/"
+    country = args.country
+    years_string = args.years
+    verbose = args.verbose
+    backup_dir = args.path
+
+    # country = 'France'
+    # years_string = '1937'
+    # verbose = True
+    # backup_dir = "backup_data/"
+
     years = parse_years(years_string)
 
     crawler = Crawler(backup_dir=backup_dir, verbose=verbose)
