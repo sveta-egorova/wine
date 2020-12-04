@@ -3,6 +3,8 @@ import sys
 
 from crawlers import *
 import pandas as pd
+import argparse
+
 
 
 def parse_years(years_string: str):
@@ -63,12 +65,18 @@ def save_reviews(review_list, backup_dir, country, year):
 
 if __name__ == "__main__":
     """
-    Usage: python test.py France 2011:2013 False
+    Usage: python crawl.py [-h] [-v] country years
     """
 
-    country = sys.argv[1]
-    years_string = sys.argv[2]
-    verbose = bool(sys.argv[3])
+    parser = argparse.ArgumentParser(description='Load some wine reviews')
+    parser.add_argument("country", type=str, help="Input the country name, eg. France")
+    parser.add_argument("years", type=str, help="Input the year or year range, eg. 2005:2010")
+    parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+    args = parser.parse_args()
+
+    country = args.country
+    years_string = args.years
+    verbose = args.verbose
 
     # country = 'France'
     # years_string = '2013:2015'
@@ -99,48 +107,3 @@ if __name__ == "__main__":
             if verbose:
                 print(f"After processing, the data on {country} in {year} includes {reviews['id'].nunique()} "
                       f"unique reviews on {reviews['vintage.wine.id'].nunique()} wines")
-
-
-    # print(reviews.groupby('vintage.year').count()['id'])
-    # print(f"Hey, I extracted a dataframe of shape {reviews.shape}")
-    # print(reviews.iloc[:5,:5])
-
-    #
-    # wine_crawler = Crawler(s)
-    # results = wine_crawler.load_all_wines(105, 107, inter_backup=False, final_backup=False, verbose=True)
-
-    # data_filtered = filter_by_country_year(data, 'France', 2013)
-    # print(f"Hey, I extracted a dataframe of shape {data_filtered.shape}")
-    # print(data_filtered.head())
-
-
-
-#     with open(f"backup_data/full_match_list", 'rb') as f:
-#         recovered_data = pickle.load(f)
-#
-#
-#     def remove_wine_duplicates(json_data):
-#         distinct_dict = {entry['vintage']['id']: entry for entry in json_data}
-#         recovered_data_distinct = distinct_dict.values()
-#         return list(recovered_data_distinct)
-#
-#
-#     recovered_data_distinct = remove_wine_duplicates(recovered_data)
-#
-#     full_df = pd.DataFrame(recovered_data_distinct)
-#     full_df_normalized = pd.json_normalize(full_df['vintage'])
-#
-#     review_filtering_df = full_df_normalized[
-#         ['id', 'year', 'has_valid_ratings', 'statistics.ratings_count', 'wine.id', 'wine.region.country.name']]
-#
-#     filter_df = review_filtering_df.loc[
-#         review_filtering_df['has_valid_ratings'] == True, ['id', 'year', 'statistics.ratings_count',
-#                                                            'wine.id', 'wine.region.country.name']]
-#
-#     filter_df.columns = ['id', 'year', 'reviews_count', 'wine_id', 'country']
-#
-#     data_Italy_2015 = filter_df[(filter_df['country'] == 'Italy') & (filter_df['year'] == 2015)].sort_values(
-#         'reviews_count', ascending=False)
-
-# data_Italy_2015.head(20)
-
