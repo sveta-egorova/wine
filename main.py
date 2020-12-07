@@ -42,22 +42,21 @@ def save_reviews_to_db(reviews: List[Dict]) -> None:
 
 
 if __name__ == '__main__':
-    base_dir = 'backup_data'
-    os.mkdir(base_dir)
-
-    row_vintages = download_vintages(0, 400)  # vintages a.k.a matches
-    dump_wines(base_dir + '/explore/all_wines.pickle', row_vintages)
-    save_vintages_to_db(row_vintages)
-
-    vintages = flatten_and_drop_columns(row_vintages)
-
-    for country in ['Italy', 'France']:
-        available_years = extract_distinct_years(vintages)
-        for year in available_years:
-            wines = filter_by_country_and_year(vintages, year, country)
-            session = requests.Session()
-            reviews = []
-            for wine in wines:
-                reviews.extend(download_reviews(session, wine))
-            dump_reviews(f'{base_dir}/reviews/{country}_{year}.pickle', reviews)
+    base_dir = 'backup_data/'
+    # os.mkdir(base_dir)
+    # row_vintages = download_vintages(0, 400)  # vintages a.k.a matches
+    # dump_wines(base_dir + '/explore/all_wines.pickle', row_vintages)
+    # save_vintages_to_db(row_vintages)
+    #
+    # vintages = flatten_and_drop_columns(row_vintages)
+    #
+    # for country in ['Italy', 'France']:
+    #     available_years = extract_distinct_years(vintages)
+    #     for year in available_years:
+    #         wines = filter_by_country_and_year(vintages, year, country)
+    #         session = requests.Session()
+    #         reviews = []
+    #         for wine in wines:
+    #             reviews.extend(download_reviews(session, wine))
+    #         dump_reviews(f'{base_dir}/reviews/{country}_{year}.pickle', reviews)
             save_reviews_to_db(reviews)
