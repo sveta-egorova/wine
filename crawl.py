@@ -6,12 +6,14 @@ from typing import List, Dict, Union
 
 Vintage = Union[str, int]
 
-def parse_years(years_string: str) -> range:
+def parse_years(years_string: str):
     """
     Function that inputs a string with the year range, and returns a Python range
     :param years_string: The string specifying the desired year range, eg. '2012:2015:
     :return: sequence of integers
     """
+    if years_string == 'N.V.':
+        return ['N.V.']
     if years_string.startswith(':'):
         year_start = 1900
     else:
@@ -110,7 +112,7 @@ def save_reviews(review_list: List[Dict], backup_dir: str, country: str, year: V
 
 if __name__ == "__main__":
     """
-    Usage: python crawl.py [-h] [-v] country years
+    Usage: python crawl.py [-h] [-v] [-p PATH] country years
     """
 
     parser = argparse.ArgumentParser(description='Load some wine reviews')
