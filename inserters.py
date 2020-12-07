@@ -7,25 +7,14 @@ import math
 
 class Inserter(ABC):
 
-    def __init__(self,
-                 table,
-                 paths=[],
-                 prefix="",
-                 pk_sql=[],
-                 from_list=False,
-                 path_to_list="",
-                 path_to_id_outside_list="",
-                 batch_size=60000):
+    def __init__(self, table, paths=[], prefix="", pk_sql=[], batch_size=60000):
         self.table = table
         self.prefix = prefix
         self.paths = [prefix + path for path in paths]
         self.pk_sql = pk_sql
-        self.from_list = from_list
-        self.path_to_list = path_to_list
-        self.path_to_id_outside_list = path_to_id_outside_list
         self.batch_size = batch_size
 
-    def _extract_json_to_sql(self, conn, matches_list, from_list_with_id, first_entry, verbose):
+    def _extract_json_to_sql(self, conn, matches_list, first_entry, verbose):
         """
         Function that accepts the folowing arguments:
         * conn: active connection to a database
@@ -40,29 +29,7 @@ class Inserter(ABC):
         """
         cur = conn.cursor()
         timepoint_1 = time.time()
-        all_args = {}
-
-        for entry in matches_list:
-            # here, each entry represents a Python dictionary
-            if from_list_with_id:
-                # if data is passed from json list, entry contains a tuple (id, relevant_data, named entry[0]
-                # and entry[1], which need to be unpacked in a single arg list
-
-                values_entry = [entry[0]] + [int_to_float(get_value(entry[1], path)) for path in self.paths]
-                if len(self.paths) == 0:
-                    for record in entry[1]:
-                        all_args[(entry[0], record)] = (entry[0], record)
-            else:
-                values_entry = [int_to_float(get_value(entry, path)) for path in self.paths]
-            pk_values = values_entry[:len(self.pk_sql)]  # provided primary keys always come first
-
-            #  We'd like to make sure that no duplicates are added to the database from our batch.
-            #  So we create an argument dictionary for each specific set of primary keys (provided that
-            #  all primary keys are not Null).
-            #  The exception is a Facts table with no primary keys (since it doesn't have any paths, we exclude it
-            #  by setting len(self.paths) > 0 for this check
-            if all(pk_value is not None for pk_value in pk_values) and len(self.paths) > 0:
-                all_args[tuple(pk_values)] = tuple(values_entry)
+        all_args = self.extract(matches_list)
 
         # part of the query that tells to do nothing on duplicate keys if such entry already exists,
         # depending on the number of primary keys
@@ -73,13 +40,6 @@ class Inserter(ABC):
                                        f"{self.pk_sql[1]} = {self.pk_sql[1]}"
         else:
             if_duplicates_do_nothing = ""
-
-        fields_num = len(self.paths)
-        if from_list_with_id and len(self.paths) > 0:  # this is the case when we retrieve info from the list,
-            # and some id from outside the list
-            fields_num += 1
-        elif len(self.paths) == 0:  # this is the only case for the Facts table, and it has just 2 columns
-            fields_num = 2
 
         query = f"""
                 INSERT INTO {self.table} VALUES ({', '.join('?' * self.fields_num())})
@@ -102,27 +62,40 @@ class Inserter(ABC):
             else:
                 print('Something went wrong')
 
+    def extract(self, matches_list):
+        all_args = {}
+        for entry in matches_list:
+            # here, each entry represents a Python dictionary
+            if from_list_with_id:
+                # if data is passed from json list, entry contains a tuple (id, relevant_data, named entry[0]
+                # and entry[1], which need to be unpacked in a single arg list
+
+                values_entry = [entry[0]] + [int_to_float(get_value(entry[1], path)) for path in self.paths]
+                if len(self.paths) == 0:
+                    for record in entry[1]:
+                        all_args[(entry[0], record)] = (entry[0], record)
+            else:
+                values_entry = [int_to_float(get_value(entry, path)) for path in self.paths]
+            pk_values = values_entry[:len(self.pk_sql)]  # provided primary keys always come first
+
+            #  We'd like to make sure that no duplicates are added to the database from our batch.
+            #  So we create an argument dictionary for each specific set of primary keys (provided that
+            #  all primary keys are not Null).
+            #  The exception is a Facts table with no primary keys (since it doesn't have any paths, we exclude it
+            #  by setting len(self.paths) > 0 for this check
+            if all(pk_value is not None for pk_value in pk_values) and len(self.paths) > 0:
+                all_args[tuple(pk_values)] = tuple(values_entry)
+
+        return all_args
+
     def insert(self, conn, matches, first_entry=False, verbose=True):
         # num_batches = math.ceil(len(matches)/self.batch_size)
         for i in range(0, len(matches), self.batch_size):
-            batch = matches[i:(i + self.batch_size)]
-            if self.from_list:
-                results = []
-                for entry in matches:
-                    if get_value(entry, self.path_to_list) is not None:
-                        for element in get_value(entry, self.path_to_list):
-                            if self.path_to_id_outside_list == "":
-                                results.append(element)
-                            else:
-                                results.append((get_value(entry, self.path_to_id_outside_list), element))
-                if self.path_to_id_outside_list == "":  # todo simplify
-                    from_json_list_with_id = False
-                else:
-                    from_json_list_with_id = True
-                batch = results
-            else:
-                from_json_list_with_id = False
-            self._extract_json_to_sql(conn, batch, from_json_list_with_id, first_entry, verbose)
+            batch = self._get_batch(i, matches)
+            self._extract_json_to_sql(conn, batch, first_entry, verbose)
+
+    def _get_batch(self, i, matches):
+        return matches[i:(i + self.batch_size)]
 
     def clean_table(self, conn):
         """
@@ -138,6 +111,44 @@ class Inserter(ABC):
         cur = conn.cursor()
         cur.execute(f"SELECT COUNT(*) FROM {self.table}")
         print(f"After insert, the table contains {cur.fetchall()[0][0]} records.")
+
+    def fields_num(self):
+        return len(self.paths)
+
+
+class FromListInserter(Inserter):
+
+    def __init__(self, table, path_to_list, paths=[], prefix="", pk_sql=[], batch_size=60000):
+        super().__init__(table, paths, prefix, pk_sql, batch_size)
+        if not path_to_list:
+            raise ValueError
+        self.path_to_list = path_to_list
+
+    def _get_batch(self, i, matches):
+        results = []
+        for entry in matches:
+            if get_value(entry, self.path_to_list) is not None:
+                for element in get_value(entry, self.path_to_list):
+                    results.append(self._get_list_element_with_id(element, entry))
+        return results
+
+    def _get_list_element_with_id(self, element, entry):
+        return element
+
+
+class FromListWithExternalIdInserter(FromListInserter):
+
+    def __init__(self, table, path_to_list, path_to_id_outside_list, paths=[], prefix="", pk_sql=[], batch_size=60000):
+        super().__init__(table, path_to_list, paths, prefix, pk_sql, batch_size)
+        if not path_to_id_outside_list:
+            raise ValueError
+        self.path_to_id_outside_list = path_to_id_outside_list
+
+    def _get_list_element_with_id(self, element, entry):
+        return get_value(entry, self.path_to_id_outside_list), element
+
+    def fields_num(self):
+        return len(self.paths) + 1
 
 
 class TypeInserter(Inserter):
@@ -231,6 +242,9 @@ class FactInserter(Inserter):
                          path_to_list=FactInserter.PATH_TO_LIST,
                          path_to_id_outside_list=FactInserter.PATH_TO_ID_OUTSIDE_LIST,
                          from_list=True)
+
+    def fields_num(self):
+        return 2
 
 
 class StyleFoodInserter(Inserter):
@@ -375,7 +389,7 @@ class UserInserter(Inserter):
     TABLE = 'user'
     PREFIX = 'user/'
     PATHS = ['id', 'seo_name', 'alias', 'is_featured', 'visibility', 'statistics/followers_count',
-             'statistics/followings_count', 'statistics/ratings_count','statistics/ratings_sum',
+             'statistics/followings_count', 'statistics/ratings_count', 'statistics/ratings_sum',
              'statistics/reviews_count']
     PK_SQL = ['id']
 
@@ -421,11 +435,6 @@ class VintageReviewInserter(Inserter):
                          pk_sql=VintageReviewInserter.PK_SQL)
 
 
-
-
-
-
-
 def int_to_float(smth):
     """
     converts integers to floats
@@ -433,7 +442,7 @@ def int_to_float(smth):
     if isinstance(smth, int):
         return float(smth)
     elif smth == 'N.V.':
-        return 0.0    # meaning, wine is of type 'non-vintage' and is made of grapes from more than one harvest
+        return 0.0  # meaning, wine is of type 'non-vintage' and is made of grapes from more than one harvest
     else:
         return smth
 
@@ -452,5 +461,3 @@ def get_value(match_entry, path0):
                 break
             current_el = current_el.get(p)
     return current_el
-
-
