@@ -1,51 +1,92 @@
 from abc import ABC
 import sys, os
-from typing import List
+from typing import List, Dict
 import time
+import mariadb
 import math
 
 
 class Inserter(ABC):
 
-    def __init__(self, table, paths=[], prefix="", pk_sql=[], batch_size=60000):
+    def __init__(self, table: str, prefix="", paths=[], pk_sql=[], batch_size=60000):
         self.table = table
         self.prefix = prefix
         self.paths = [prefix + path for path in paths]
         self.pk_sql = pk_sql
         self.batch_size = batch_size
 
-    def _extract_json_to_sql(self, conn, matches_list, first_entry, verbose):
+    @staticmethod
+    def _get_value(match_entry: Dict, path0: str) -> any:
         """
-        Function that accepts the folowing arguments:
-        * conn: active connection to a database
-        * matches_list: JSON list with data,
-        * from_list_with_id: defines if data is stored as a list inside JSON with some ID stored outside that list
-        * first_entry: boolean indicating whether it's the first time data is written to the table
-        * verbose: prints the progress of loading
+        Function that returns a value found at a given path inside a given JSON record
+        """
+        if path0 is None:
+            current_el = match_entry
+        else:
+            path = path0.split('/')
+            current_el = match_entry
+            for p in path:
+                if current_el is None:
+                    break
+                current_el = current_el.get(p)
+        return current_el
 
-        Function inserts data and (for the first entry) checks whether the resulting number of unique records in SQL
-        matches the number of unique records in JSON.
+    @staticmethod
+    def _format_numbers(smth: any) -> any:
+        """
+        Function that converts integers to floats, and non-vintage year mark ('N.V') to zeroes
+        """
+        if isinstance(smth, int):
+            return float(smth)
+        elif smth == 'N.V.':
+            return 0.0  # meaning, wine is of type 'non-vintage' and is made of grapes from more than one harvest
+        else:
+            return smth
 
+    def _extract_args(self, matches_list: List[Dict]) -> List[tuple]:
+        """
+        Function that converts raw JSON data to a list of tuple with specific fields necessary for a given inserter,
+        no duplicates and no missing primary keys
+        """
+        all_args = {}
+        for entry in matches_list:
+            # here, each entry represents a Python dictionary
+            values_entry = [Inserter._format_numbers(Inserter._get_value(entry, path)) for path in self.paths]
+            pk_values = values_entry[:len(self.pk_sql)]  # provided primary keys always come first
+            #  We'd like to eliminate duplicates from our batch, as well as records with Null primary keys.
+            if all(pk_value is not None for pk_value in pk_values):
+                all_args[tuple(pk_values)] = tuple(values_entry)
+        return list(all_args.values())
+
+    def _fields_num(self):
+        """
+        Function that returns the number of fields in SQL for a given inserter
+        """
+        return len(self.paths)
+
+    def _insert_json_to_sql(self, conn, matches: List[Dict],
+                            first_entry: bool, verbose: bool) -> None:
+        """
+        Function inserts JSON data to SQL and (if it's the first entry) checks whether the resulting number of unique
+        records in SQL matches the number of unique records in JSON.
         """
         cur = conn.cursor()
         timepoint_1 = time.time()
-        all_args = self.extract(matches_list)
+        args = self._extract_args(matches)
 
         # part of the query that tells to do nothing on duplicate keys if such entry already exists,
         # depending on the number of primary keys
-        if len(self.pk_sql) == 1:
-            if_duplicates_do_nothing = f" ON DUPLICATE KEY UPDATE {self.pk_sql[0]} = {self.pk_sql[0]}"
-        elif len(self.pk_sql) == 2:
-            if_duplicates_do_nothing = f" ON DUPLICATE KEY UPDATE {self.pk_sql[0]} = {self.pk_sql[0]}, " \
-                                       f"{self.pk_sql[1]} = {self.pk_sql[1]}"
+        if len(self.pk_sql) == 0:
+            if_duplicates_do_nothing = ''
         else:
-            if_duplicates_do_nothing = ""
+            if_duplicates_do_nothing = ' ON DUPLICATE KEY UPDATE ' + \
+                                       ', '.join([f'{key} = {key}' for key in self.pk_sql])
 
         query = f"""
-                INSERT INTO {self.table} VALUES ({', '.join('?' * self.fields_num())})
+                INSERT INTO {self.table} VALUES ({', '.join('?' * self._fields_num())})
                 {if_duplicates_do_nothing}
             """.strip()
-        cur.executemany(query, list(all_args.values()))
+        cur.executemany(query, args)
         conn.commit()
 
         timepoint_2 = time.time()
@@ -55,104 +96,102 @@ class Inserter(ABC):
         if first_entry:
             cur = conn.cursor()
             cur.execute('SELECT COUNT(*) FROM {}'.format(self.table))
-            unique_sql = cur.fetchall()[0][0]  # counts unique entries in the table after the insert statement
-            unique_python = len(list(all_args.values()))  # counts unique entries in JSON
-            if unique_python == unique_sql:
+            records_sql = cur.fetchall()[0][0]  # counts unique entries in the table after the insert statement
+            args_python = len(args)  # counts unique entries in JSON
+            if args_python == records_sql:
                 print('Number of unique records is accurate')
             else:
                 print('Something went wrong')
 
-    def extract(self, matches_list):
-        all_args = {}
-        for entry in matches_list:
-            # here, each entry represents a Python dictionary
-            if from_list_with_id:
-                # if data is passed from json list, entry contains a tuple (id, relevant_data, named entry[0]
-                # and entry[1], which need to be unpacked in a single arg list
-
-                values_entry = [entry[0]] + [int_to_float(get_value(entry[1], path)) for path in self.paths]
-                if len(self.paths) == 0:
-                    for record in entry[1]:
-                        all_args[(entry[0], record)] = (entry[0], record)
-            else:
-                values_entry = [int_to_float(get_value(entry, path)) for path in self.paths]
-            pk_values = values_entry[:len(self.pk_sql)]  # provided primary keys always come first
-
-            #  We'd like to make sure that no duplicates are added to the database from our batch.
-            #  So we create an argument dictionary for each specific set of primary keys (provided that
-            #  all primary keys are not Null).
-            #  The exception is a Facts table with no primary keys (since it doesn't have any paths, we exclude it
-            #  by setting len(self.paths) > 0 for this check
-            if all(pk_value is not None for pk_value in pk_values) and len(self.paths) > 0:
-                all_args[tuple(pk_values)] = tuple(values_entry)
-
-        return all_args
-
-    def insert(self, conn, matches, first_entry=False, verbose=True):
-        # num_batches = math.ceil(len(matches)/self.batch_size)
-        for i in range(0, len(matches), self.batch_size):
-            batch = self._get_batch(i, matches)
-            self._extract_json_to_sql(conn, batch, first_entry, verbose)
-
-    def _get_batch(self, i, matches):
+    def _get_batch(self, i: int, matches: List[Dict]) -> List[Dict]:
+        """
+        Function that returns a batch to be inserted to SQL (controls the weight)
+        """
         return matches[i:(i + self.batch_size)]
 
-    def clean_table(self, conn):
+    def insert(self, conn, matches: List[Dict], first_entry=False, verbose=True) -> None:
         """
-        delete all records from a given table in a given database
+        Function that inserts JSON data into SQL (splitting into batches along the way)
+        :param conn: active connection to x
+        :param matches: original JSON
+        :param first_entry: boolean indicating whether it's the first time data is written to the table
+        :param verbose: boolean if asked to print the progress of loading
+        :return: None
+        """
+        for i in range(0, len(matches), self.batch_size):
+            batch = self._get_batch(i, matches)
+            self._insert_json_to_sql(conn, batch, first_entry, verbose)
+
+    def clean_table(self, conn) -> None:
+        """
+        Function that deletes all records from a given table in a given database
         """
         cur = conn.cursor()
         cur.execute(f'DELETE FROM {self.table}')
 
-    def count_unique_records(self, conn):
+    def count_records(self, conn, when='After') -> None:
         """
-        checks the number of unique records in a given table
+        Function that checks the number of unique records in a given table
         """
         cur = conn.cursor()
         cur.execute(f"SELECT COUNT(*) FROM {self.table}")
-        print(f"After insert, the table contains {cur.fetchall()[0][0]} records.")
-
-    def fields_num(self):
-        return len(self.paths)
+        print(f"{when} insert, the table {self.table} contains {cur.fetchall()[0][0]} records.")
 
 
 class FromListInserter(Inserter):
 
-    def __init__(self, table, path_to_list, paths=[], prefix="", pk_sql=[], batch_size=60000):
-        super().__init__(table, paths, prefix, pk_sql, batch_size)
+    def __init__(self, table, path_to_list, paths_from_list=[], pk_sql=[], batch_size=60000):
+        super().__init__(table, '', paths_from_list, pk_sql, batch_size)
         if not path_to_list:
             raise ValueError
         self.path_to_list = path_to_list
 
-    def _get_batch(self, i, matches):
+    def _get_list_element_with_id(self, element: any, entry: Dict) -> any:
+        return element
+
+    def _get_batch(self, i: int, matches: List[Dict]) -> List[Dict]:
         results = []
-        for entry in matches:
-            if get_value(entry, self.path_to_list) is not None:
-                for element in get_value(entry, self.path_to_list):
+        for entry in matches: # here, entry is a dictionary that contains required values
+            if Inserter._get_value(entry, self.path_to_list) is not None:
+                for element in Inserter._get_value(entry, self.path_to_list):
                     results.append(self._get_list_element_with_id(element, entry))
         return results
-
-    def _get_list_element_with_id(self, element, entry):
-        return element
 
 
 class FromListWithExternalIdInserter(FromListInserter):
 
-    def __init__(self, table, path_to_list, path_to_id_outside_list, paths=[], prefix="", pk_sql=[], batch_size=60000):
-        super().__init__(table, path_to_list, paths, prefix, pk_sql, batch_size)
+    def __init__(self, table, path_to_list, path_to_id_outside_list, paths_from_list=[], pk_sql=[], batch_size=60000):
+        super().__init__(table, path_to_list, paths_from_list, pk_sql, batch_size)
         if not path_to_id_outside_list:
             raise ValueError
         self.path_to_id_outside_list = path_to_id_outside_list
 
-    def _get_list_element_with_id(self, element, entry):
-        return get_value(entry, self.path_to_id_outside_list), element
+    def _get_list_element_with_id(self, element: any, entry: Dict): #TODO type annot
+        return Inserter._get_value(entry, self.path_to_id_outside_list), element
 
-    def fields_num(self):
+    def _extract_args(self, matches_list: List) -> List[tuple]: #TODO type annot
+        all_args = {}
+        for entry in matches_list:
+            # here, each entry represents a tuple with two elements:
+            # id and a JSON element for extraction of necessary paths
+            if len(self.paths) == 0:
+                for record in entry[1]:
+                    all_args[(entry[0], record)] = (entry[0], record)
+            else:
+                values_entry = [entry[0]] + \
+                               [Inserter._format_numbers(Inserter._get_value(entry[1], path)) for path in self.paths]
+                pk_values = values_entry[:len(self.pk_sql)]  # provided primary keys always come first
+                #  We'd like to eliminate duplicates from our batch, as well as records with Null primary keys.
+                if all(pk_value is not None for pk_value in pk_values):
+                    all_args[tuple(pk_values)] = tuple(values_entry)
+        return list(all_args.values())
+
+    def _fields_num(self):
         return len(self.paths) + 1
 
 
 class TypeInserter(Inserter):
-    TABLE = 'TYPE'
+    TABLE = 'type'
 
     def __init__(self):
         super().__init__(TypeInserter.TABLE)
@@ -161,7 +200,7 @@ class TypeInserter(Inserter):
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO {self.table} VALUES (1, 'Red'), (2, 'White'), (3, 'Sparkling'), (4, 'Rose'), (7, 'Dessert'), "
-            f"(24, 'Fortified'), (25, 'Other')")
+            f"(24, 'Fortified'), (25, 'Other') ON DUPLICATE KEY UPDATE id = id")
 
 
 class WineryInserter(Inserter):
@@ -218,7 +257,7 @@ class StyleInserter(Inserter):
                          pk_sql=StyleInserter.PK_SQL)
 
 
-class FoodInserter(Inserter):
+class FoodInserter(FromListInserter):
     TABLE = 'food'
     PATHS = ['id', 'name', 'seo_name']
     PATH_TO_LIST = 'vintage/wine/style/food'
@@ -226,13 +265,12 @@ class FoodInserter(Inserter):
 
     def __init__(self):
         super().__init__(FoodInserter.TABLE,
-                         paths=FoodInserter.PATHS,
                          path_to_list=FoodInserter.PATH_TO_LIST,
-                         pk_sql=FoodInserter.PK_SQL,
-                         from_list=True)
+                         paths_from_list=FoodInserter.PATHS,
+                         pk_sql=FoodInserter.PK_SQL)
 
 
-class FactInserter(Inserter):
+class FactInserter(FromListWithExternalIdInserter):
     TABLE = 'facts'
     PATH_TO_LIST = 'vintage/wine/style/interesting_facts'
     PATH_TO_ID_OUTSIDE_LIST = 'vintage/wine/style/id'
@@ -240,14 +278,13 @@ class FactInserter(Inserter):
     def __init__(self):
         super().__init__(FactInserter.TABLE,
                          path_to_list=FactInserter.PATH_TO_LIST,
-                         path_to_id_outside_list=FactInserter.PATH_TO_ID_OUTSIDE_LIST,
-                         from_list=True)
+                         path_to_id_outside_list=FactInserter.PATH_TO_ID_OUTSIDE_LIST)
 
-    def fields_num(self):
+    def _fields_num(self):
         return 2
 
 
-class StyleFoodInserter(Inserter):
+class StyleFoodInserter(FromListWithExternalIdInserter):
     TABLE = 'style_food'
     PATH_TO_LIST = 'vintage/wine/style/food'
     PATHS = ['id']
@@ -256,14 +293,13 @@ class StyleFoodInserter(Inserter):
 
     def __init__(self):
         super().__init__(StyleFoodInserter.TABLE,
-                         paths=StyleFoodInserter.PATHS,
                          path_to_list=StyleFoodInserter.PATH_TO_LIST,
+                         paths_from_list=StyleFoodInserter.PATHS,
                          path_to_id_outside_list=StyleFoodInserter.PATH_TO_ID_OUTSIDE_LIST,
-                         pk_sql=StyleFoodInserter.PK_SQL,
-                         from_list=True)
+                         pk_sql=StyleFoodInserter.PK_SQL)
 
 
-class GrapeInserter(Inserter):
+class GrapeInserter(FromListInserter):
     TABLE = 'grape'
     PATH_TO_LIST = 'vintage/wine/style/grapes'
     PATHS = ['id', 'name', 'seo_name', 'has_detailed_info', 'wines_count']
@@ -271,13 +307,12 @@ class GrapeInserter(Inserter):
 
     def __init__(self):
         super().__init__(GrapeInserter.TABLE,
-                         paths=GrapeInserter.PATHS,
                          path_to_list=GrapeInserter.PATH_TO_LIST,
-                         pk_sql=GrapeInserter.PK_SQL,
-                         from_list=True)
+                         paths_from_list=GrapeInserter.PATHS,
+                         pk_sql=GrapeInserter.PK_SQL)
 
 
-class StyleGrapeInserter(Inserter):
+class StyleGrapeInserter(FromListWithExternalIdInserter):
     TABLE = 'style_grape'
     PATH_TO_LIST = 'vintage/wine/style/grapes'
     PATHS = ['id']
@@ -286,14 +321,13 @@ class StyleGrapeInserter(Inserter):
 
     def __init__(self):
         super().__init__(StyleGrapeInserter.TABLE,
-                         paths=StyleGrapeInserter.PATHS,
                          path_to_list=StyleGrapeInserter.PATH_TO_LIST,
+                         paths_from_list=StyleGrapeInserter.PATHS,
                          path_to_id_outside_list=StyleGrapeInserter.PATH_TO_ID_OUTSIDE_LIST,
-                         pk_sql=StyleGrapeInserter.PK_SQL,
-                         from_list=True)
+                         pk_sql=StyleGrapeInserter.PK_SQL)
 
 
-class CountryGrapeInserter(Inserter):
+class CountryGrapeInserter(FromListWithExternalIdInserter):
     TABLE = 'country_grape'
     PATH_TO_LIST = 'vintage/wine/style/grapes'
     PATHS = ['id']
@@ -302,11 +336,10 @@ class CountryGrapeInserter(Inserter):
 
     def __init__(self):
         super().__init__(CountryGrapeInserter.TABLE,
-                         paths=CountryGrapeInserter.PATHS,
                          path_to_list=CountryGrapeInserter.PATH_TO_LIST,
+                         paths_from_list=CountryGrapeInserter.PATHS,
                          path_to_id_outside_list=CountryGrapeInserter.PATH_TO_ID_OUTSIDE_LIST,
-                         pk_sql=CountryGrapeInserter.PK_SQL,
-                         from_list=True)
+                         pk_sql=CountryGrapeInserter.PK_SQL)
 
 
 class WineInserter(Inserter):
@@ -355,7 +388,7 @@ class VintageInserter(Inserter):
                          pk_sql=VintageInserter.PK_SQL)
 
 
-class ToplistInserter(Inserter):
+class ToplistInserter(FromListInserter):
     TABLE = 'toplist'
     PATH_TO_LIST = 'vintage/top_list_rankings'
     PATHS = ['top_list/id', 'top_list/location', 'top_list/name', 'top_list/seo_name', 'top_list/type', 'top_list/year']
@@ -363,13 +396,12 @@ class ToplistInserter(Inserter):
 
     def __init__(self):
         super().__init__(ToplistInserter.TABLE,
-                         paths=ToplistInserter.PATHS,
                          path_to_list=ToplistInserter.PATH_TO_LIST,
-                         pk_sql=ToplistInserter.PK_SQL,
-                         from_list=True)
+                         paths_from_list=ToplistInserter.PATHS,
+                         pk_sql=ToplistInserter.PK_SQL)
 
 
-class VintageToplistInserter(Inserter):
+class VintageToplistInserter(FromListWithExternalIdInserter):
     TABLE = 'vintage_toplist'
     PATH_TO_LIST = 'vintage/top_list_rankings'
     PATHS = ['top_list/id', 'top_list/rank', 'top_list/previous_rank', 'top_list/description']
@@ -378,11 +410,10 @@ class VintageToplistInserter(Inserter):
 
     def __init__(self):
         super().__init__(VintageToplistInserter.TABLE,
-                         paths=VintageToplistInserter.PATHS,
                          path_to_list=VintageToplistInserter.PATH_TO_LIST,
+                         paths_from_list=VintageToplistInserter.PATHS,
                          pk_sql=VintageToplistInserter.PK_SQL,
-                         path_to_id_outside_list=VintageToplistInserter.PATH_TO_ID_OUTSIDE_LIST,
-                         from_list=True)
+                         path_to_id_outside_list=VintageToplistInserter.PATH_TO_ID_OUTSIDE_LIST)
 
 
 class UserInserter(Inserter):
@@ -435,29 +466,4 @@ class VintageReviewInserter(Inserter):
                          pk_sql=VintageReviewInserter.PK_SQL)
 
 
-def int_to_float(smth):
-    """
-    converts integers to floats
-    """
-    if isinstance(smth, int):
-        return float(smth)
-    elif smth == 'N.V.':
-        return 0.0  # meaning, wine is of type 'non-vintage' and is made of grapes from more than one harvest
-    else:
-        return smth
 
-
-def get_value(match_entry, path0):
-    """
-    Function that returns a value found at a given path inside a given JSON record
-    """
-    if path0 is None:
-        current_el = match_entry
-    else:
-        path = path0.split('/')
-        current_el = match_entry
-        for p in path:
-            if current_el is None:
-                break
-            current_el = current_el.get(p)
-    return current_el

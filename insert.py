@@ -9,7 +9,7 @@ import settings
 import pickle
 
 
-def connect_to_vivino_db():
+def connect_to_vivino_db(): #TODO type annot
     """
     connect to vivino db and return a connection instance
     """
@@ -27,35 +27,36 @@ def connect_to_vivino_db():
 
 
 # todo delete
-def fix_encoding(conn):
-    tables = ['wine_flavor_group', 'wine_keyword', 'keyword', 'vintage_toplist', 'toplist', 'vintage', 'wine',
-              'style_grape', 'style_food', 'grape', 'food', 'facts', 'price', 'winery', 'type', 'country', 'style',
-              'region', 'country_grape', 'user', 'review', 'activity', 'vintage_review']
-    try:
-        conn.cursor().execute("ALTER DATABASE vivino CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;")
-        for table in tables:
-            conn.cursor().execute(f"ALTER TABLE {table} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
-            print(f"enconding of table {table} converted")
-    finally:
-        conn.close()
+# def fix_encoding(conn):
+#     tables = ['wine_flavor_group', 'wine_keyword', 'keyword', 'vintage_toplist', 'toplist', 'vintage', 'wine',
+#               'style_grape', 'style_food', 'grape', 'food', 'facts', 'price', 'winery', 'type', 'country', 'style',
+#               'region', 'country_grape', 'user', 'review', 'activity', 'vintage_review']
+#     try:
+#         conn.cursor().execute("ALTER DATABASE vivino CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;")
+#         for table in tables:
+#             conn.cursor().execute(f"ALTER TABLE {table} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+#             print(f"enconding of table {table} converted")
+#     finally:
+#         conn.close()
 
 
-def read_files_insert_to_sql(dir: str, inserters: List[Inserter], first_entry: bool, verbose: bool):
+def read_files_insert_to_sql(dir: str, inserters: List[Inserter], first_entry: bool, verbose: bool) -> None:
     for filename in os.listdir(dir):
-        if filename.startswith("."):
+        if filename.startswith(".") or os.path.isdir(os.path.join(dir, filename)):
             pass
         else:
             with open(f'{dir}{filename}', 'rb') as f:
                 cur_data = pickle.load(f)
                 conn = connect_to_vivino_db()
-                # fix_encoding(conn)
                 try:
-                    for inserter in inserters:
-                        if first_entry:
+                    if first_entry:
+                        for inserter in reversed(inserters):
+                            inserter.count_records(conn, 'Before')
                             inserter.clean_table(conn)
+                    for inserter in inserters:
                         inserter.insert(conn, cur_data, first_entry, verbose)
                         if verbose:
-                            inserter.count_unique_records(conn)
+                            inserter.count_records(conn)
                 finally:
                     conn.close()
 
@@ -68,21 +69,27 @@ if __name__ == '__main__':
     Usage: python insert.py [-w | -r] [-f] [-v] [-p PATH]
     """
 
-    parser = argparse.ArgumentParser(description='Write data to SQL database')
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("-w", "--wines", help="if wines should be loaded to SQL", action="store_true")
-    group.add_argument("-r", "--reviews", help="if reviews should be loaded to SQL", action="store_true")
-    parser.add_argument("-f", "--first", help="if loading data for the first time", action="store_true")
-    parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-    parser.add_argument("-p", "--path", help="path to load data", default="backup_data/")
+    # parser = argparse.ArgumentParser(description='Write data to SQL database')
+    # group = parser.add_mutually_exclusive_group()
+    # group.add_argument("-w", "--wines", help="if wines should be loaded to SQL", action="store_true")
+    # group.add_argument("-r", "--reviews", help="if reviews should be loaded to SQL", action="store_true")
+    # parser.add_argument("-f", "--first", help="if loading data for the first time", action="store_true")
+    # parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+    # parser.add_argument("-p", "--path", help="path to load data", default="backup_data/")
+    #
+    # args = parser.parse_args()
 
-    args = parser.parse_args()
+    # store_wines = args.wines
+    # store_reviews = args.reviews
+    # first_entry = args.first
+    # verbose = args.verbose
+    # backup_dir = args.path
 
-    store_wines = args.wines
-    store_reviews = args.reviews
-    first_entry = args.first
-    verbose = args.verbose
-    backup_dir = args.path
+    store_wines = True
+    store_reviews = False
+    first_entry = True
+    verbose = True
+    backup_dir = "backup_data/"
 
     mapping = {
         'wines': [TypeInserter(), WineryInserter(), CountryInserter(), RegionInserter(), StyleInserter(),
@@ -94,11 +101,11 @@ if __name__ == '__main__':
 
     inserters = []
     if store_wines:
-        backup_dir = backup_dir  # todo maybe delete
-        inserters = mapping['wines']
+        # backup_dir = backup_dir  # todo maybe delete
+        inserters.extend(mapping['wines'])
     elif store_reviews:
-        backup_dir = backup_dir + 'reviews/'  # todo maybe delete
-        inserters = mapping['reviews']
+        # backup_dir = backup_dir + 'reviews/'  # todo maybe delete
+        inserters.extend(mapping['reviews'])
 
     read_files_insert_to_sql(backup_dir, inserters, first_entry, verbose)
 
