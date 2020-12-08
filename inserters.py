@@ -1,9 +1,6 @@
 from abc import ABC
-import sys, os
 from typing import List, Dict
 import time
-import mariadb
-import math
 
 
 class Inserter(ABC):
@@ -64,8 +61,7 @@ class Inserter(ABC):
         """
         return len(self.paths)
 
-    def _insert_json_to_sql(self, conn, matches: List[Dict],
-                            first_entry: bool, verbose: bool) -> None:
+    def _insert_json_to_sql(self, conn, matches: List[Dict], verbose: bool) -> None:
         """
         Function inserts JSON data to SQL and (if it's the first entry) checks whether the resulting number of unique
         records in SQL matches the number of unique records in JSON.
@@ -73,6 +69,13 @@ class Inserter(ABC):
         cur = conn.cursor()
         timepoint_1 = time.time()
         args = self._extract_args(matches)
+
+        if verbose:
+            # find the number of records before insertion
+            cur2 = conn.cursor()
+            cur2.execute('SELECT COUNT(*) FROM {}'.format(self.table))
+            records_sql_before = cur2.fetchall()[0][0]  # counts unique entries in the table before the insert statement
+            cur2.close()
 
         # part of the query that tells to do nothing on duplicate keys if such entry already exists,
         # depending on the number of primary keys
@@ -86,22 +89,27 @@ class Inserter(ABC):
                 INSERT INTO {self.table} VALUES ({', '.join('?' * self._fields_num())})
                 {if_duplicates_do_nothing}
             """.strip()
-        cur.executemany(query, args)
-        conn.commit()
-
         timepoint_2 = time.time()
-        if verbose:
-            print(f'Insertion to {self.table} complete and took {timepoint_2 - timepoint_1} s.')
+        print(f'Up until execution the current iteration took {round(timepoint_2 - timepoint_1, 2)} s.')
+        cur.executemany(query, args)
+        timepoint_3 = time.time()
+        print(f'Program took {round(timepoint_3 - timepoint_2, 2)} s. to execute')
+        conn.commit()
+        timepoint_4 = time.time()
+        print(f'Program took {round(timepoint_4 - timepoint_3, 2)} s. to commit changes')
 
-        if first_entry:
-            cur = conn.cursor()
-            cur.execute('SELECT COUNT(*) FROM {}'.format(self.table))
-            records_sql = cur.fetchall()[0][0]  # counts unique entries in the table after the insert statement
+        if verbose:
+            print(f'Insertion to {self.table} complete and took {round(time.time() - timepoint_1, 2)} s.')
+
+            cur3 = conn.cursor()
+            cur3.execute('SELECT COUNT(*) FROM {}'.format(self.table))
+            records_sql_after = cur3.fetchall()[0][0]  # counts unique entries in the table after the insert statement
             args_python = len(args)  # counts unique entries in JSON
-            if args_python == records_sql:
-                print('Number of unique records is accurate')
+            if args_python == (records_sql_after - records_sql_before):
+                print(f'Number of unique records in table {self.table} is accurate and equals {records_sql_after} '
+                      f'after insert')
             else:
-                print('Something went wrong')
+                print(f'The table {self.table} increased by {(records_sql_after - records_sql_before)} records')
 
     def _get_batch(self, i: int, matches: List[Dict]) -> List[Dict]:
         """
@@ -109,18 +117,17 @@ class Inserter(ABC):
         """
         return matches[i:(i + self.batch_size)]
 
-    def insert(self, conn, matches: List[Dict], first_entry=False, verbose=True) -> None:
+    def insert(self, conn, matches: List[Dict], verbose: bool) -> None:
         """
         Function that inserts JSON data into SQL (splitting into batches along the way)
         :param conn: active connection to x
         :param matches: original JSON
-        :param first_entry: boolean indicating whether it's the first time data is written to the table
         :param verbose: boolean if asked to print the progress of loading
         :return: None
         """
         for i in range(0, len(matches), self.batch_size):
             batch = self._get_batch(i, matches)
-            self._insert_json_to_sql(conn, batch, first_entry, verbose)
+            self._insert_json_to_sql(conn, batch, verbose)
 
     def clean_table(self, conn) -> None:
         """
@@ -129,13 +136,13 @@ class Inserter(ABC):
         cur = conn.cursor()
         cur.execute(f'DELETE FROM {self.table}')
 
-    def count_records(self, conn, when='After') -> None:
+    def count_records(self, conn, when='After insert') -> None:
         """
         Function that checks the number of unique records in a given table
         """
         cur = conn.cursor()
         cur.execute(f"SELECT COUNT(*) FROM {self.table}")
-        print(f"{when} insert, the table {self.table} contains {cur.fetchall()[0][0]} records.")
+        print(f"{when}, the table {self.table} contains {cur.fetchall()[0][0]} records.")
 
 
 class FromListInserter(Inserter):
@@ -196,7 +203,7 @@ class TypeInserter(Inserter):
     def __init__(self):
         super().__init__(TypeInserter.TABLE)
 
-    def insert(self, conn, matches=None, first_entry=False, verbose=True):
+    def insert(self, conn, matches=None, verbose=True):
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO {self.table} VALUES (1, 'Red'), (2, 'White'), (3, 'Sparkling'), (4, 'Rose'), (7, 'Dessert'), "
@@ -452,7 +459,8 @@ class ReviewInserter(Inserter):
     def __init__(self):
         super().__init__(ReviewInserter.TABLE,
                          paths=ReviewInserter.PATHS,
-                         pk_sql=ReviewInserter.PK_SQL)
+                         pk_sql=ReviewInserter.PK_SQL,
+                         batch_size=50000)
 
 
 class VintageReviewInserter(Inserter):
