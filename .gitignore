@@ -13,3 +13,5 @@ data-export/
 secrets.py
 __pycache__/
 venv/
+/cli.py
+vivino.db
