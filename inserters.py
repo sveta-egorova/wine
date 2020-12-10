@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import List, Dict
 import time
+from ratelimiter import RateLimiter
 
 
 class Inserter(ABC):
@@ -61,6 +62,7 @@ class Inserter(ABC):
         """
         return len(self.paths)
 
+    # @RateLimiter(1, 60)
     def _insert_json_to_sql(self, conn, matches: List[Dict], verbose: bool) -> None:
         """
         Function inserts JSON data to SQL and (if it's the first entry) checks whether the resulting number of unique
@@ -135,6 +137,7 @@ class Inserter(ABC):
         """
         cur = conn.cursor()
         cur.execute(f'DELETE FROM {self.table}')
+        conn.commit()
 
     def count_records(self, conn, when='After insert') -> None:
         """
@@ -182,8 +185,8 @@ class FromListWithExternalIdInserter(FromListInserter):
             # here, each entry represents a tuple with two elements:
             # id and a JSON element for extraction of necessary paths
             if len(self.paths) == 0:
-                for record in entry[1]:
-                    all_args[(entry[0], record)] = (entry[0], record)
+                # for record in entry[1]:
+                all_args[entry] = entry
             else:
                 values_entry = [entry[0]] + \
                                [Inserter._format_numbers(Inserter._get_value(entry[1], path)) for path in self.paths]
@@ -208,6 +211,7 @@ class TypeInserter(Inserter):
         cur.execute(
             f"INSERT INTO {self.table} VALUES (1, 'Red'), (2, 'White'), (3, 'Sparkling'), (4, 'Rose'), (7, 'Dessert'), "
             f"(24, 'Fortified'), (25, 'Other') ON DUPLICATE KEY UPDATE id = id")
+        conn.commit()
 
 
 class WineryInserter(Inserter):
@@ -382,10 +386,10 @@ class PriceInserter(Inserter):
 
 class VintageInserter(Inserter):
     TABLE = 'vintage'
-    PREFIX = 'vintage/'
-    PATHS = ['id', 'seo_name', 'name', 'wine/id', 'year', 'has_valid_ratings',
-             'statistics/status', 'statistics/ratings_count', 'statistics/ratings_average',
-             'statistics/labels_count', 'price/id']
+    PREFIX = ''
+    PATHS = ['vintage/id', 'vintage/seo_name', 'vintage/name', 'vintage/wine/id', 'vintage/year',
+             'vintage/has_valid_ratings', 'vintage/statistics/status', 'vintage/statistics/ratings_count',
+             'vintage/statistics/ratings_average', 'vintage/statistics/labels_count', 'price/id', 'price/amount']
     PK_SQL = ['id']
 
     def __init__(self):
@@ -411,7 +415,7 @@ class ToplistInserter(FromListInserter):
 class VintageToplistInserter(FromListWithExternalIdInserter):
     TABLE = 'vintage_toplist'
     PATH_TO_LIST = 'vintage/top_list_rankings'
-    PATHS = ['top_list/id', 'top_list/rank', 'top_list/previous_rank', 'top_list/description']
+    PATHS = ['top_list/id', 'rank', 'previous_rank', 'description']
     PATH_TO_ID_OUTSIDE_LIST = 'vintage/id'
     PK_SQL = ['vintage_id', 'toplist_id']
 
@@ -460,7 +464,7 @@ class ReviewInserter(Inserter):
         super().__init__(ReviewInserter.TABLE,
                          paths=ReviewInserter.PATHS,
                          pk_sql=ReviewInserter.PK_SQL,
-                         batch_size=50000)
+                         batch_size=6000)
 
 
 class VintageReviewInserter(Inserter):

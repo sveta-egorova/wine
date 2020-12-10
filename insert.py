@@ -72,34 +72,34 @@ if __name__ == '__main__':
     Usage: python insert.py [-w | -r] [-f] [-v] [-p PATH]
     """
 
-    # parser = argparse.ArgumentParser(description='Write data to SQL database')
-    # group = parser.add_mutually_exclusive_group()
-    # group.add_argument("-w", "--wines", help="if wines should be loaded to SQL", action="store_true")
-    # group.add_argument("-r", "--reviews", help="if reviews should be loaded to SQL", action="store_true")
-    # parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-    # parser.add_argument("-c", "--clean", help="cleans table before inserting", action="store_true")
-    # parser.add_argument("-p", "--path", help="path to load data", default="backup_data/")
-    #
-    # args = parser.parse_args()
-    #
-    # store_wines = args.wines
-    # store_reviews = args.reviews
-    # verbose = args.verbose
-    # clean = args.clean
-    # backup_dir = args.path
+    parser = argparse.ArgumentParser(description='Write data to SQL database')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-w", "--wines", help="if wines should be loaded to SQL", action="store_true")
+    group.add_argument("-r", "--reviews", help="if reviews should be loaded to SQL", action="store_true")
+    parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+    parser.add_argument("-c", "--clean", help="cleans table before inserting", action="store_true")
+    parser.add_argument("-p", "--path", help="path to load data", default="backup_data/")
 
-    store_wines = False
-    store_reviews = True
-    verbose = True
-    clean = False
-    backup_dir = "backup_data/reviews/France/"
+    args = parser.parse_args()
+
+    store_wines = args.wines
+    store_reviews = args.reviews
+    verbose = args.verbose
+    clean_first = args.clean
+    backup_dir = args.path
+
+    # store_wines = True
+    # store_reviews = False
+    # verbose = True
+    # clean_first = True
+    # backup_dir = "backup_data/"
 
     mapping = {
         'wines': [TypeInserter(), WineryInserter(), CountryInserter(), RegionInserter(), StyleInserter(),
                   FoodInserter(), FactInserter(), StyleFoodInserter(), GrapeInserter(), StyleGrapeInserter(),
                   CountryGrapeInserter(), WineInserter(), PriceInserter(), VintageInserter(), ToplistInserter(),
                   VintageToplistInserter()],
-        'reviews': [ReviewInserter(), VintageReviewInserter()] #[UserInserter(), ActivityInserter(),
+        'reviews': [UserInserter(), ActivityInserter(), ReviewInserter(), VintageReviewInserter()]
     }
 
     inserters = []
@@ -110,7 +110,7 @@ if __name__ == '__main__':
         # backup_dir = backup_dir + 'reviews/'  # todo maybe delete
         inserters.extend(mapping['reviews'])
 
-    read_files_insert_to_sql(backup_dir, inserters, clean, verbose)
+    read_files_insert_to_sql(backup_dir, inserters, clean_first, verbose)
 
 
 
