@@ -21,9 +21,9 @@ Permission to use and analyze data from vivino.com was granted by the company re
 
 * Code written in Python;
 * Interaction with the user in the command line (`argparse` library);
-* Data extraction from non-public API of vivino (`requests` and `ratelimiter` libraries);
+* Data extraction from non-documented API of vivino (`requests` and `ratelimiter` libraries);
 * Data stored on the local computer as binary files (`pickle` library);
-* Data inserted to MySQL (MariaDB) database using AWS cloud resources (`mariadb` library);
+* Data inserted to MySQL (MariaDB) database using AWS RDS (`mariadb` library);
 * Data analysis and visualization in Jupyter notebooks (mainly, `numpy`, `pandas`, `matplotlib`, `seaborn`, `scikit-learn`, `keras` libraries) - work in progress
 
 ## Code design
