@@ -3,9 +3,9 @@
 ## Introduction
 
 The goal of this project is to extract useful insights about wine preferences based on data published on vivino.com about wines, users and their wine reviews / scores. 
-The most interesting questions are:
+Some of the questions are:
 1. Which factors mainly contribute to the price of wine
-2. Whether user scores and/or length of reviews are caused by the price, or the other way around
+2. Whether user scores and/or length of reviews are caused by the price
 3. Whether users generaly prefer domestic wines as opposed to imported wines with similar qualities (on the example of wines produced in France and Italy being the two largest wine markets)
 4. Whether certain patterns can be found from the review texts written in English (e.g. depending on the user expertise, country of residence, given score, price, etc)
 
