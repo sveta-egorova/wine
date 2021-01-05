@@ -4,3 +4,5 @@ bs4
 selenium
 ratelimiter
 mariadb
+xgboost
+sklearn
